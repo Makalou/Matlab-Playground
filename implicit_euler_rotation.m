@@ -28,10 +28,6 @@ J = [Ixx, Ixy, Ixz;
 
 J_inv = inv(J);
 
-function A = skew(v)
-    A = [0, -v(3), v(2); v(3), 0, -v(1); -v(2), v(1), 0];
-end
-
 torque = [0 0 0]';
 
 dt = 0.01;
@@ -43,6 +39,7 @@ X2 = zeros(3,N)';
 X3 = zeros(3,N)';
 L = zeros(3,N)';
 W = zeros(3,N)';
+match_errors = zeros(1,N)';
 
 Y1 = zeros(3,N)';
 Y2 = zeros(3,N)';
@@ -54,69 +51,11 @@ y3_old = x30;
 
 [V,D] = eig(R*J*R');
 
-w = 20 * V(:,1);
-%w = 10 * [20 * rand(1)-10 20 * rand(1) - 10 20 * rand(1) - 10]';
+%w0 = 100 * V(:,1);
+w0 =  [20 * rand(1)-10 20 * rand(1) - 10 20 * rand(1) - 10]';
 
-w2 = w;
-
-function [w_new, R_new] = euler_step(w_old, R_old,J,J_inv,torque,dt)
-    L = R_old*J*R_old'*w_old;
-    alpha = R_old*J_inv*R_old'*(torque - cross(w_old,L));
-    w_new = w_old + alpha * dt;
-    R_new = expm(skew(w_new)*dt) * R_old;
-end
-
-function R = mymap(A)
-    R = expm(A);
-end
-
-function [w_new, R_new] = rk4_step(w_old, R_old,J,J_inv,torque,dt)
-    L = R_old*J*R_old'*w_old;
-    alpha1 = R_old*J_inv*R_old'*(torque - cross(w_old,L));
-    A1 = skew(w_old);
-
-    w_in = w_old + dt/2 * alpha1;
-    R_in = mymap(A1*dt/2) * R_old;
-
-    L = R_in*J*R_in'*w_in;
-    alpha2 = R_in*J_inv*R_in'*(torque - cross(w_in,L));
-    A2 = skew(w_in);
-
-    w_in = w_old + dt/2 * alpha2;
-    R_in = mymap(A2*dt/2) * R_old;
-
-    L = R_in*J*R_in'*w_in;
-    alpha3 = R_in*J_inv*R_in'*(torque - cross(w_in,L));
-    A3 = skew(w_in);
-
-    w_in = w_old + dt * alpha3;
-    R_in = mymap(A3*dt) * R_old;
-
-    L = R_in*J*R_in'*w_in;
-    alpha4 = R_in*J_inv*R_in'*(torque - cross(w_in,L));
-    A4 = skew(w_in);
-
-    w_new = w_old + (alpha1 + 2*alpha2 + 2*alpha3 + alpha4)*dt/6;
-
-    R_new = mymap((A1 + 2*A2 + 2*A3 + A4)*dt/6)*R_old;
-end
-
-function w_new = explicit_solve_w(R,J,J_inv,w_old,torque,dt)
-    alpha = R*J_inv*R'*(torque - cross(w_old,R*J*R'*w_old));
-    w_new = w_old + alpha * dt;
-end
-
-function w_new = implicit_solve_w(R,J,J_inv,w_old,torque,dt)
-    w_new = w_old;
-    A = R*J*R';
-    for i = 1 : 32
-        f = A*(w_new - w_old) + cross(w_new,A*w_new) * dt - torque * dt;
-        dfdw = A - skew(A*w_new) * dt;
-        rhs = -f;
-        dw = dfdw \ rhs;
-        w_new = w_new + dw;
-    end
-end
+w = w0;
+w2 = w0;
 
 for i = 1 : N
     L1 = R*J*R'*w;
@@ -152,7 +91,9 @@ for i = 1 : N
     y3_in_center = y3_in - mc_in;
 
     % Compute covariance matrix
-    H = (y1_in_center * y1_old_center' + y2_in_center * y2_old_center' + y3_in_center * y3_old_center');
+    % I don't know why it better to put mass here
+    % I don't even sure it works for all scenarios :(
+    H = (m1*y1_in_center * x10' + m2*y2_in_center * x20' + m3*y3_in_center * x30');
     [U,~,V] = svd(H);
 
     R_opt = U * V';
@@ -164,9 +105,13 @@ for i = 1 : N
 
     disp(norm(R_opt * R_opt' - eye(3) ,'fro'));
 
-    y1_new = R_opt * y1_old_center + mc_in;
-    y2_new = R_opt * y2_old_center + mc_in;
-    y3_new = R_opt * y3_old_center + mc_in;
+    m_err = norm(R_opt * x10 - y1_in_center,2) + norm(R_opt * x20 - y2_in_center,2) + norm(R_opt * x30 - y3_in_center,2);
+
+    match_errors(i) = m_err;
+
+    y1_new = R_opt * x10 + mc_in;
+    y2_new = R_opt * x20 + mc_in;
+    y3_new = R_opt * x30 + mc_in;
 
     w2 = implicit_solve_w(R_opt,J,J_inv,w2,torque,dt);
 
@@ -267,5 +212,68 @@ for i = 1:N
     drawnow;
     % Pause to create animation effect
     pause(dt);
+end
+
+function A = skew(v)
+    A = [0, -v(3), v(2); v(3), 0, -v(1); -v(2), v(1), 0];
+end
+
+function [w_new, R_new] = euler_step(w_old, R_old,J,J_inv,torque,dt)
+    L = R_old*J*R_old'*w_old;
+    alpha = R_old*J_inv*R_old'*(torque - cross(w_old,L));
+    w_new = w_old + alpha * dt;
+    R_new = expm(skew(w_new)*dt) * R_old;
+end
+
+function R = mymap(A)
+    R = expm(A);
+end
+
+function [w_new, R_new] = rk4_step(w_old, R_old,J,J_inv,torque,dt)
+    L = R_old*J*R_old'*w_old;
+    alpha1 = R_old*J_inv*R_old'*(torque - cross(w_old,L));
+    A1 = skew(w_old);
+
+    w_in = w_old + dt/2 * alpha1;
+    R_in = mymap(A1*dt/2) * R_old;
+
+    L = R_in*J*R_in'*w_in;
+    alpha2 = R_in*J_inv*R_in'*(torque - cross(w_in,L));
+    A2 = skew(w_in);
+
+    w_in = w_old + dt/2 * alpha2;
+    R_in = mymap(A2*dt/2) * R_old;
+
+    L = R_in*J*R_in'*w_in;
+    alpha3 = R_in*J_inv*R_in'*(torque - cross(w_in,L));
+    A3 = skew(w_in);
+
+    w_in = w_old + dt * alpha3;
+    R_in = mymap(A3*dt) * R_old;
+
+    L = R_in*J*R_in'*w_in;
+    alpha4 = R_in*J_inv*R_in'*(torque - cross(w_in,L));
+    A4 = skew(w_in);
+
+    w_new = w_old + (alpha1 + 2*alpha2 + 2*alpha3 + alpha4)*dt/6;
+
+    R_new = mymap((A1 + 2*A2 + 2*A3 + A4)*dt/6)*R_old;
+end
+
+function w_new = explicit_solve_w(R,J,J_inv,w_old,torque,dt)
+    alpha = R*J_inv*R'*(torque - cross(w_old,R*J*R'*w_old));
+    w_new = w_old + alpha * dt;
+end
+
+function w_new = implicit_solve_w(R,J,J_inv,w_old,torque,dt)
+    w_new = w_old;
+    A = R*J*R';
+    for i = 1 : 32
+        f = A*(w_new - w_old) + cross(w_new,A*w_new) * dt - torque * dt;
+        dfdw = A - skew(A*w_new) * dt;
+        rhs = -f;
+        dw = dfdw \ rhs;
+        w_new = w_new + dw;
+    end
 end
 
