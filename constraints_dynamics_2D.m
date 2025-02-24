@@ -1,5 +1,5 @@
 N = 10;  % Number of points
-M = 15;  % Number of edges
+M = 10;  % Number of edges
 X0 = 2 * rand(N,2) - 1;
 E = zeros(N-1, 2);
 
@@ -61,23 +61,14 @@ X = zeros(N,2,Nt);
 X(:,:,1) = X0;
 
 V = zeros(N, 2);
-g = [0 -9.8];
+g = [0 -9.8]; % set value to large then you can see the difference between 2 methods
+% newton solver tend to suffer from overshooting problem.
 
 % Simulation loop
 for t = 1 : Nt - 1
     V = V + g * dt;
     X_in = X(:,:,t) + V * dt;
-    for i = 1 : 10 % number of constraints solve step
-        X_in(fixed_point,:) = X0(fixed_point,:);
-        for k = 1 : size(C,1)
-            Ck = C{k}(X_in);
-            X_in_flatten = reshape(X_in', 1, []);
-            DCDXk = DCDX{k}(X_in_flatten);
-            X_in_flatten = X_in_flatten - Ck / (DCDXk * DCDXk') * DCDXk; 
-            X_in = reshape(X_in_flatten, 2, N)';
-        end
-    end
-    X(:,:,t+1) = X_in;
+    X(:,:,t+1) = gauss_newton_solver(X_in,X0,fixed_point,C,DCDX);
     V = (X(:,:,t+1) - X(:,:,t))/dt;
 end
 
@@ -111,4 +102,38 @@ for i = 1 : Nt
         h_edges(j).YData = [X_now(n1,2), X_now(n2,2)];
     end
     pause(dt);
+end
+
+function X = gauss_seidel_solver(X,X0,fixed_point,C,DCDX)
+    N = size(X,1);
+    for i = 1 : 5 % number of constraints solve step
+        X(fixed_point,:) = X0(fixed_point,:);
+        for k = 1 : size(C,1)
+            Ck = C{k}(X);
+            X_flatten = reshape(X', 1, []);
+            DCDXk = DCDX{k}(X_flatten);
+            X_flatten = X_flatten - Ck / (DCDXk * DCDXk') * DCDXk; 
+            X = reshape(X_flatten, 2, N)';
+        end
+    end
+    X(fixed_point,:) = X0(fixed_point,:);
+end
+
+function X = gauss_newton_solver(X,X0,fixed_point,C,DCDX)
+    N = size(X,1);
+    gamma = 1e3;
+    Y_flatten = reshape(X', 1, []);
+    for i = 1 : 5
+        X(fixed_point,:) = X0(fixed_point,:);
+        Cx = cellfun(@(Ck) Ck(X),C);
+        X_flatten = reshape(X', 1, []);
+        DCDx = cellfun(@(DCDXk) DCDXk(X_flatten),DCDX,UniformOutput=false);
+        DCDx = cell2mat(DCDx);
+        M = eye(2*N) + gamma * (DCDx' * DCDx);
+        rhs = -(X_flatten' - Y_flatten') - gamma *DCDx'*Cx;
+        dX = M \ rhs;
+        X_flatten = X_flatten + dX';
+        X = reshape(X_flatten, 2, N)';
+    end
+    X(fixed_point,:) = X0(fixed_point,:);
 end
