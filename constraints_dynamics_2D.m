@@ -87,7 +87,7 @@ axis([-5 5 -5 5]);
 hold on;
 scatter(X0(fixed_point,1),X0(fixed_point,2),'r');
 hold on;
-h_edges = gobjects(size(edges, 1), 1);
+h_edges = gobjects(size(E, 1), 1);
 for i = 1:size(E, 1)
     n1 = E(i, 1);
     n2 = E(i, 2);
